@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=65", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agiros-tools"
+version = "0.1.0"
+description = "AGIROS packaging and build helper CLI"
+readme = "README.md"
+requires-python = ">=3.8"
+dynamic = ["dependencies"]
+authors = [{name = "AGIROS Team"}]
+
+[project.scripts]
+agiros-tools-menu = "agiros_tools_menu:main"
+agiros-oob-build = "agiros_oob_builder_procedural:main"
+agiros-tracks-download = "oob_tracks_to_sources:main"
+agiros-release-download = "yaml_git_downloader_release:main"
+agiros-git-build = "git_build_any:main"
+agiros-rpm-build = "rpmbuild_any:main"
+agiros-clean-generated = "clean_generated:main"
+
+[tool.setuptools]
+package-dir = {"" = "../.."}
+py-modules = [
+  "agiros_tools_menu",
+  "agiros_oob_builder_procedural",
+  "oob_tracks_to_sources",
+  "yaml_git_downloader_release",
+  "git_build_any",
+  "rpmbuild_any",
+  "clean_generated",
+]
+include-package-data = true
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
