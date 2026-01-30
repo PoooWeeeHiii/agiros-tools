@@ -12,12 +12,11 @@
 - 所有缺失的 rosdep rules 会记录到 fail.log，交互默认 "n"
 
 本次微调：
-- 将 argparse 默认值提取到 **全局 Defaults 区**，保持其余代码不变；
+- 将 argparse 默认值提取到 全局 Defaults 区，保持其余代码不变；
 - 通过 Defaults 提供统一默认值，必要时可被环境变量覆盖。
 - 新增 `--generate-gbp` 开关：在批量生成 debian/ 时，
   通过给 `bloom-generate agirosdebian` 追加 `--generate-gbp`，并注入
   `OOB_TRACKS_DIR` / `OOB_TRACKS_DISTRO` 环境变量，批量为各包生成 `debian/gbp.conf`。
-  （其余逻辑保持不变）
 """
 import shlex
 import argparse
@@ -33,7 +32,9 @@ import shlex  # 新增：支持把 BLOOM_BIN 解析为多段命令
 # ----------------------------- Global Defaults -----------------------------
 class Defaults:
     """集中管理 argparse 默认值，可通过环境变量覆盖。"""
-    ROS_DISTRO: str = os.environ.get("AGIROS_ROS_DISTRO", "loong")
+    AGIROS_DISTRO: str = os.environ.get("AGIROS_DISTRO", "loong")
+    ROS2_DISTRO: str = os.environ.get("ROS2_DISTRO", "jazzy")
+    OS_NAMECODE: str = os.environ.get("OS_NAMECODE", "Unknow")
     UBUNTU_DEFAULT: str = os.environ.get("AGIROS_UBUNTU_DEFAULT", "jammy")
     OPENEULER_DEFAULT: str = os.environ.get("AGIROS_OE_DEFAULT", "24")
     # 多值用逗号分隔覆盖：AGIROS_OE_FALLBACK="22,23"
@@ -179,7 +180,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--release-dir", required=True)
     ap.add_argument("--code-dir", required=True)
-    ap.add_argument("--ros-distro", default=Defaults.ROS_DISTRO)
+    ap.add_argument("--ros-distro", default=Defaults.AGIROS_DISTRO)
+    ap.add_argument("--ros2-distro", default=Defaults.ROS2_DISTRO)
     ap.add_argument("--ubuntu-default", default=Defaults.UBUNTU_DEFAULT)
 
     # 将原来的 rhel-* 参数替换为 openeuler-* 参数
@@ -200,7 +202,7 @@ def main():
 
     args = ap.parse_args()
 
-
+    _distro = args.ros2_distro
     release_dir = Path(args.release_dir)
     code_dir = Path(args.code_dir)
     fail_log = Path("fail.log")
@@ -210,7 +212,7 @@ def main():
     if args.mode == "gbp":
         args.generate_gbp = True
 
-    parser = TracksParser("jazzy")
+    parser = TracksParser(_distro)
     pkgs = []
     for child in sorted(release_dir.iterdir()):
         if not child.is_dir():
@@ -221,19 +223,19 @@ def main():
                 pkgs.append((child.name, p))
                 break
 
-    log(f"[INFO] 开始扫描 release_dir... 共发现 {len(pkgs)} 个含 tracks.yaml 的包目录")
+    log(f"[INFO] 开始扫描 {release_dir}... 共发现 {len(pkgs)} 个含 tracks.yaml 的包目录")
 
     total = 0
     with fail_log.open("w", encoding="utf-8") as flog:
         for pkg_name, yaml_path in pkgs[: args.limit or len(pkgs)]:
             section = parser.parse_file(yaml_path)
             if not section:
-                log(f"[SKIP] {pkg_name}: 无 jazzy 段")
+                log(f"[SKIP] {pkg_name}/{yaml_path.name}: 无 {_distro} 段")
                 continue
 
             actions = section.get("actions") or []
             if not actions:
-                log(f"[SKIP] {pkg_name}: jazzy.actions 为空")
+                log(f"[SKIP] {pkg_name}/{yaml_path.name}: {_distro}.actions 为空")
                 continue
 
             # 检测需求
@@ -245,7 +247,7 @@ def main():
 
             pkg_dir = code_dir / pkg_name
             if not pkg_dir.is_dir():
-                log(f"[SKIP] code_dir 中不存在: {pkg_dir}")
+                log(f"[SKIP] {code_dir.name} 中不存在: {pkg_dir.name}")
                 continue
 
             subpackages = find_subpackages(pkg_dir)
@@ -283,7 +285,7 @@ def main():
                     if sub_need_ubuntu:
                         base = build_cmd_for('debian', args.bloom_bin)
                         deb_cmd = base + (["agirosdebian"] if not is_direct_module_cmd(base) else []) + [
-                            "--ros-distro", args.ros_distro,
+                            "--ros-distro", args.agiros_distro,
                             "--os-name", "ubuntu",
                             "--os-version", args.ubuntu_default,
                         ]
@@ -293,12 +295,12 @@ def main():
                             # 通过环境变量把 tracks 目录与目标 distro 注入给 agirosdebian
                             deb_env = os.environ.copy()
                             deb_env["OOB_TRACKS_DIR"] = str(release_dir)
-                            tracks_key = deb_env.get("AGIROS_TRACKS_DISTRO") or deb_env.get("OOB_TRACKS_DISTRO") or "jazzy"
+                            tracks_key = deb_env.get("ROS2_DISTRO") or deb_env.get("OOB_TRACKS_DISTRO") or "jazzy"
                             deb_env["OOB_TRACKS_DISTRO"] = tracks_key
-                            deb_env["AGIROS_DISTRO"] = args.ros_distro
+                            deb_env["AGIROS_DISTRO"] = args.agiros_distro
                             deb_cmd.append("--generate-gbp")
                             deb_cmd.extend(["--tracks-distro", tracks_key])
-                            deb_cmd.extend(["--distro", args.ros_distro])
+                            deb_cmd.extend(["--distro", args.agiros_distro])
                             deb_cmd.extend(["--pkg", subpkg.name])
                         rc, out = run(deb_cmd, cwd=subpkg, dry_run=args.dry_run, env=deb_env)
                         if rc == 0:
@@ -306,11 +308,11 @@ def main():
                             log(f"[OK] {pkg_name}: 已生成 debian/ {'(含 gbp.conf)' if args.generate_gbp else ''}")
                         else:
                             with fail_log.open("a", encoding="utf-8") as flog2:
-                                flog2.write(f"{pkg_name} ubuntu 失败 rc={rc}\n")
+                                flog2.write(f"{pkg_name} ubuntu 生成debian失败 rc={rc}\n")
                                 if out:
                                     for l in out.splitlines():
-                                        if "No agirosdep rule for" in l:
-                                            flog2.write(f"缺失 rule: {l}\n")
+                                        if "no agirosdep rule for" in l:
+                                            flog2.write(f"agirosdep 缺失 rule: {l}\n")
 
                     if sub_need_oe:
                         versions = [args.openeuler_default] + [v for v in args.openeuler_fallback if v != args.openeuler_default]
@@ -318,7 +320,7 @@ def main():
                         for ver in versions:
                             base = build_cmd_for('rpm', args.bloom_bin)
                             rpm_cmd = base + (["agirosrpm"] if not is_direct_module_cmd(base) else []) + [
-                                "--ros-distro", args.ros_distro,
+                                "--ros-distro", args.agiros_distro,
                                 "--os-name", "openeuler",
                                 "--os-version", ver,
                             ]
