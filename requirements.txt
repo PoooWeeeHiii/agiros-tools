@@ -4,10 +4,13 @@ requests>=2.31
 PyYAML>=6.0
 python-dotenv>=1.0
 catkin_pkg>=0.4.3
-setuptools>=65.0
 empy<4
 packaging>=23.0
 python-dateutil>=2.8
-rosdep>=0.15.0
-rosdistro>=0.8.0
 vcstools>=0.1.22
+PyQt5>=5.15
+pyautogui>=0.9
+pyperclip>=1.8
+python-dotenv>=1.0.0
+setuptools>=65.5
+tqdm
