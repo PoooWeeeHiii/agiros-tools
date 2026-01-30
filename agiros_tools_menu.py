@@ -3,11 +3,16 @@ import json
 import os
 import platform
 import shlex
+import shutil
 import sys
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
+from change_ros2agiros import change_ros2agiros_tag 
+from debian_dep_sort import compute_series_toposort, discover_debian_package_dirs
+from debuild_runner import auto_mark_prebuilt_packages
+from os_base import get_sys_info
 
 try:
     from rich import box
@@ -111,7 +116,7 @@ def run_stream(cmd: Sequence[str], cwd: Optional[Path] = None, env: Optional[Dic
     )
     assert proc.stdout is not None
     for line in proc.stdout:
-        console.print(line.rstrip())
+        console.print(line.rstrip(), markup=False)
     proc.wait()
     if proc.returncode != 0:
         console.print(f"[bold red]命令退出码: {proc.returncode}[/]")
@@ -130,6 +135,8 @@ class BuildTask:
     extra_args: List[str] = field(default_factory=list)
 
 
+
+
 def to_display_name(state: "MenuState", pkg_path: Path) -> str:
     try:
         return str(pkg_path.relative_to(state.code_dir))
@@ -139,13 +146,29 @@ def to_display_name(state: "MenuState", pkg_path: Path) -> str:
 
 @dataclass
 class MenuState:
-    distribution_url: str = "http://1.94.193.239/yumrepo/agiros/agirosdep/loong/distribution.yaml"
-    release_dir: Path = Path(os.environ.get("AGIROS_RELEASE_DIR", "ros2_release_dir"))
-    code_dir: Path = Path(os.environ.get("AGIROS_CODE_DIR", "ros2_code_dir"))
+    #_agiros_release_Tags: str = "loong/2025-12"
+    #_ros2_release_Tags: str = "humble/2025-10-20" # 
+
+    _agiros_release_Tags: str = "pixiu/2025-12"
+    _ros2_release_Tags: str = "jazzy/2025-10-14" # https://github.com/ros/rosdistro/blob/humble/2025-10-20/humble/distribution.yaml
+
+    _agiros_distro: str = _agiros_release_Tags.split("/")[0] 
+    _ros2_distro: str = _ros2_release_Tags.split("/")[0]  # 取_release_Tags第一个斜杠前面的部分
+    _prefix = _ros2_release_Tags.replace("/", "_")
+    ros2_distro: str = os.environ.get("ROS2_DISTRO", _ros2_distro)
+    #distribution_url: str = "http://1.94.193.239/yumrepo/agiros/agirosdep/loong/distribution.yaml"
+    distribution_url: str = f"https://github.com/ros/rosdistro/blob/{_ros2_release_Tags}/{ros2_distro}/distribution.yaml" ##https://github.com/ros/rosdistro/blob/jazzy/2025-10-14/jazzy/distribution.yaml
+    
+    _ros2_release_dir = _prefix + "_ros2_release" #ros2_release_dir取值为release_Tags的/换成横杠，并加上_ros2_release
+    release_dir: Path = Path(os.environ.get("AGIROS_RELEASE_DIR", _ros2_release_dir))
+    _ros2_code_dir = _prefix + "_ros2_code" #ros2_code_dir取值为release_Tags的/换成横杠，并加上_ros2_code
+    code_dir: Path = Path(os.environ.get("AGIROS_CODE_DIR", _ros2_code_dir))
     code_label: str = os.environ.get("AGIROS_CODE_LABEL", "code_dir")
-    tracks_distro: str = os.environ.get("AGIROS_TRACKS_DISTRO", "jazzy")
-    ros_distro: str = os.environ.get("AGIROS_ROS_DISTRO", "loong")
-    ubuntu_version: str = os.environ.get("AGIROS_UBUNTU_DEFAULT", "jammy")
+    third_party_dir: Path = Path(os.environ.get("THIRD_PARTY_DIR", "/mnt/3-party"))
+    install_prefix: Path = Path(os.environ.get("AGIROS_INSTALL_PREFIX", f"/opt/agiros/{_agiros_distro}"))
+    
+    agiros_distro: str = os.environ.get("AGIROS_DISTRO", _agiros_distro)
+    ubuntu_version: str = os.environ.get("AGIROS_UBUNTU_DEFAULT", "jammy") # "noble"
     openeuler_default: str = os.environ.get("AGIROS_OE_DEFAULT", "24")
     openeuler_fallback: List[str] = field(default_factory=lambda: [item.strip() for item in os.environ.get("AGIROS_OE_FALLBACK", "22,23").split(",") if item.strip()])
     bloom_bin: str = os.environ.get("AGIROS_BLOOM_BIN", "bloom-generate")
@@ -153,17 +176,22 @@ class MenuState:
     debian_build_args: List[str] = field(default_factory=lambda: ["--git-ignore-branch", "--git-ignore-new", "-us", "-uc"])
     rpm_build_base: str = os.environ.get("AGIROS_RPMBUILD_BIN", "rpmbuild")
     rpm_build_args: List[str] = field(default_factory=lambda: ["-ba"])
-    deb_out_dir: Path = Path(os.environ.get("DEB_OUT", str(Path.home() / "deb_out")))
-    deb_distro: str = os.environ.get("DISTRO", "loong")
+    deb_out_dir: Path = Path(os.environ.get("DEB_OUT", str(Path.home() / (_prefix + "_deb_out"))))
+    deb_distro: str = os.environ.get("DISTRO", _agiros_distro)
     deb_release_inc: str = os.environ.get("DEFAULT_REL_INC", "1")
     deb_parallel: str = os.environ.get("PARALLEL", str(os.cpu_count() or 4))
+    colcon_src_dir: str = os.environ.get("COLCON_SRC_DIR", "")
+    agiros_apt_source: str = os.environ.get("AGIROS_APT_SOURCE", "")
+    agiros_apt_source_file: Path = Path(os.environ.get("AGIROS_APT_SOURCE_FILE", "/etc/apt/sources.list.d/agiros.list"))
+    auto_fix_deps: bool = bool(int(os.environ.get("AGIROS_AUTO_FIX_DEPS", "1")))
     git_user_name: str = os.environ.get("GIT_USER_NAME", "PoooWeeeHiii")
     git_user_email: str = os.environ.get("GIT_USER_EMAIL", "powehi041210@gmail.com")
-    queue_file: Path = Path(os.environ.get("AGIROS_QUEUE_FILE", str(REPO_ROOT / "build_queue.txt")))
+    queue_file: Path = Path(os.environ.get("AGIROS_QUEUE_FILE", str(REPO_ROOT / (_prefix + "_build_queue.txt"))))
     queue_meta_file: Path = Path(os.environ.get("AGIROS_QUEUE_META", ""))
     build_queue: List[BuildTask] = field(default_factory=list)
     queue_packages: List[str] = field(default_factory=list)
     package_status: Dict[str, bool] = field(default_factory=dict)
+    os_name, os_version, os_codename, os_arch, python_version = get_sys_info()
 
     def __post_init__(self) -> None:
         self.queue_file = self._normalize_path(self.queue_file)
@@ -185,16 +213,42 @@ class MenuState:
         base = str(queue_path)
         return Path(f"{base}.meta.json")
 
+    def _prepend_env_path(self, env: Dict[str, str], key: str, new_value: Optional[str]) -> None:
+        if not new_value:
+            return
+        existing = env.get(key, "")
+        parts = [item for item in existing.split(":") if item]
+        parts = [item for item in parts if item != new_value]
+        env[key] = ":".join([new_value] + parts) if parts else new_value
+
+    def apply_install_prefix_env(self, env: Dict[str, str]) -> None:
+        prefix = str(self.install_prefix)
+        if not prefix:
+            return
+        env["AGIROS_INSTALL_PREFIX"] = prefix
+        for key in ("AMENT_PREFIX_PATH", "CMAKE_PREFIX_PATH", "COLCON_PREFIX_PATH"):
+            self._prepend_env_path(env, key, prefix)
+        self._prepend_env_path(env, "PKG_CONFIG_PATH", str(self.install_prefix / "lib/pkgconfig"))
+        self._prepend_env_path(env, "LD_LIBRARY_PATH", str(self.install_prefix / "lib"))
+        self._prepend_env_path(env, "PATH", str(self.install_prefix / "bin"))
+        self._prepend_env_path(env, "PYTHONPATH", str(self.install_prefix / "lib/python3/dist-packages"))
+
+    def build_env(self) -> Dict[str, str]:
+        env = os.environ.copy()
+        self.apply_install_prefix_env(env)
+        return env
+
     def update_env(self) -> None:
         mappings = {
             "AGIROS_RELEASE_DIR": str(self.release_dir),
             "AGIROS_RELEASE_TARGET_DIR": str(self.release_dir),
             "AGIROS_CODE_DIR": str(self.code_dir),
             "AGIROS_CODE_LABEL": self.code_label,
-            "AGIROS_TRACKS_DISTRO": self.tracks_distro,
-            "AGIROS_ROS_DISTRO": self.ros_distro,
-            "AGIROS_DISTRO": self.ros_distro,
+            "ROS2_DISTRO": self.ros2_distro,
+            "AGIROS_DISTRO": self.agiros_distro,
+            "AGIROS_INSTALL_PREFIX": str(self.install_prefix),
             "AGIROS_UBUNTU_DEFAULT": self.ubuntu_version,
+            "OS_NAMECODE": self.os_codename,
             "AGIROS_OE_DEFAULT": self.openeuler_default,
             "AGIROS_OE_FALLBACK": ",".join(self.openeuler_fallback),
             "AGIROS_BLOOM_BIN": self.bloom_bin,
@@ -204,6 +258,9 @@ class MenuState:
             "DISTRO": self.deb_distro,
             "DEFAULT_REL_INC": self.deb_release_inc,
             "PARALLEL": self.deb_parallel,
+            "AGIROS_APT_SOURCE": self.agiros_apt_source,
+            "AGIROS_APT_SOURCE_FILE": str(self.agiros_apt_source_file),
+            "AGIROS_AUTO_FIX_DEPS": "1" if self.auto_fix_deps else "0",
             "GIT_USER_NAME": self.git_user_name,
             "GIT_USER_EMAIL": self.git_user_email,
             "AGIROS_QUEUE_FILE": str(self.queue_file),
@@ -211,6 +268,12 @@ class MenuState:
         }
         for key, value in mappings.items():
             os.environ[key] = value
+        if self.colcon_src_dir:
+            colcon_src = self.colcon_src_dir.strip()
+        else:
+            colcon_src = "src" if (self.code_dir / "src").exists() else "."
+        os.environ["COLCON_SRC_DIR"] = colcon_src
+        self.apply_install_prefix_env(os.environ)
 
     def refresh_from_env(self) -> None:
         """Sync state fields from process-wide environment variables."""
@@ -251,10 +314,11 @@ class MenuState:
 
         _set_path("AGIROS_RELEASE_DIR", "release_dir")
         _set_path("AGIROS_CODE_DIR", "code_dir")
+        _set_path("AGIROS_INSTALL_PREFIX", "install_prefix")
         _set_path("DEB_OUT", "deb_out_dir")
         _set_str("AGIROS_CODE_LABEL", "code_label")
-        _set_str("AGIROS_TRACKS_DISTRO", "tracks_distro")
-        _set_str("AGIROS_ROS_DISTRO", "ros_distro")
+        _set_str("ROS2_DISTRO", "ros2_distro")
+        _set_str("AGIROS_DISTRO", "agiros_distro")
         _set_str("AGIROS_UBUNTU_DEFAULT", "ubuntu_version")
         _set_str("AGIROS_OE_DEFAULT", "openeuler_default")
         _set_list("AGIROS_OE_FALLBACK", "openeuler_fallback")
@@ -264,6 +328,10 @@ class MenuState:
         _set_str("DISTRO", "deb_distro")
         _set_str("DEFAULT_REL_INC", "deb_release_inc")
         _set_str("PARALLEL", "deb_parallel")
+        _set_str("COLCON_SRC_DIR", "colcon_src_dir")
+        _set_str("AGIROS_APT_SOURCE", "agiros_apt_source")
+        _set_path("AGIROS_APT_SOURCE_FILE", "agiros_apt_source_file")
+        _set_bool("AGIROS_AUTO_FIX_DEPS", "auto_fix_deps")
         _set_str("GIT_USER_NAME", "git_user_name")
         _set_str("GIT_USER_EMAIL", "git_user_email")
         _set_path("AGIROS_QUEUE_FILE", "queue_file")
@@ -511,14 +579,19 @@ class MenuState:
         self.queue_meta_file.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def summary_rows(self) -> List[Tuple[str, str]]:
+        
         return [
-            ("Release 仓库", str(self.release_dir)),
-            ("源码目录", str(self.code_dir)),
+            ("操作系统", f"名称:{self.os_name} 版本:{self.os_version} 版本代号:{self.os_codename} 架构:{self.os_arch}"),
+            ("Python 版本", self.python_version),
             ("distribution.yaml URL", self.distribution_url),
-            ("Tracks 发行版", self.tracks_distro),
-            ("ROS 发行版", self.ros_distro),
-            ("Ubuntu 版本", self.ubuntu_version),
-            ("openEuler 默认", self.openeuler_default),
+            ("distribution.yaml 本地目录", f"预先存放在源码code目录下,将不从URL下载"),
+            ("Release 仓库目录", str(self.release_dir)),
+            ("安装前缀目录", str(self.install_prefix)),
+            ("源码code目录", str(self.code_dir)),
+            ("ROS2 发行版", self.ros2_distro),
+            ("AGIROS 发行版", self.agiros_distro),
+            ("Ubuntu 代号", f"目标:{self.ubuntu_version}  当前版本代号:{self.os_codename}" if self.os_name == 'Ubuntu' else f"{self.ubuntu_version}"), #如果当前系统是ubuntu，则显示ubuntu版本
+            ("openEuler 默认", f"目标:{self.openeuler_default}  当前版本代号:{self.os_codename}" if self.os_name == 'openEuler' else f"{self.openeuler_default}"), #如果当前系统是openEuler，则显示openEuler默认版本
             ("openEuler 回退", ", ".join(self.openeuler_fallback) or "-"),
             ("bloom 命令", self.bloom_bin),
             ("批量生成 gbp.conf", "启用" if self.auto_generate_gbp else "关闭"),
@@ -528,6 +601,10 @@ class MenuState:
             ("Debian 发行版", self.deb_distro),
             ("Debian release_inc", self.deb_release_inc),
             ("并行构建线程", self.deb_parallel),
+            ("COLCON_SRC_DIR", self.colcon_src_dir or "(auto)"),
+            ("AGIROS APT 源", self.agiros_apt_source or "(未设置)"),
+            ("AGIROS APT 源文件", str(self.agiros_apt_source_file)),
+            ("自动修复依赖", "启用" if self.auto_fix_deps else "关闭"),
             ("Git User", f"{self.git_user_name} <{self.git_user_email}>"),
             ("队列文件", str(self.queue_file)),
             ("队列元数据", str(self.queue_meta_file)),
@@ -555,7 +632,18 @@ def handle_download_release(state: MenuState) -> None:
     if not url:
         console.print("[yellow]已取消：缺少 URL[/]")
         return
-    target = ask_text("Release 仓库存放目录", str(state.release_dir))
+    
+    
+    _code_or_tracks = ask_confirm("直接下载code? (No=tracks)", default=True)
+    if _code_or_tracks:
+        code_or_tracks = "code"
+        dir = str(state.code_dir)
+        target = ask_text("源码(code)仓库存放目录", dir)
+    else:
+        code_or_tracks = "tracks"
+        dir = str(state.release_dir)
+        target = ask_text("Release(tracks)仓库存放目录", dir)
+        
     if not target:
         console.print("[yellow]已取消：缺少目录[/]")
         return
@@ -568,7 +656,7 @@ def handle_download_release(state: MenuState) -> None:
     downloader.TARGET_DIR = str(target_path)
     downloader.LOG_FILE = os.path.join(downloader.TARGET_DIR, "download_log.txt")
     try:
-        downloader.download_repos_from_yaml(url, str(target_path))
+        downloader.download_repos_from_distribution_yaml(url, str(target_path), code_or_tracks)
     except Exception as exc:
         console.print(f"[bold red]下载失败: {exc}[/]")
         return
@@ -581,7 +669,7 @@ def handle_download_release(state: MenuState) -> None:
 def handle_tracks_download(state: MenuState) -> None:
     release_dir = ask_text("Release 仓库目录", str(state.release_dir))
     code_dir = ask_text("源码目录", str(state.code_dir))
-    distro = ask_text("Tracks 发行版名称", state.tracks_distro)
+    distro = ask_text("Tracks ROS2 发行版名称", state.ros2_distro)
     resume = ask_confirm("启用断点续传 (resume)?", default=True)
     limit_raw = ask_text("限制下载包数量 (留空则全部下载)", "")
     args = [
@@ -608,7 +696,7 @@ def handle_tracks_download(state: MenuState) -> None:
         return
     state.release_dir = Path(release_dir).expanduser().resolve()
     state.code_dir = Path(code_dir).expanduser().resolve()
-    state.tracks_distro = distro
+    state.ros2_distro = distro
     state.update_env()
 
 
@@ -703,6 +791,144 @@ def prompt_package_path(state: MenuState) -> Optional[Path]:
             console.print("[red]选择的包无法解析，请重试。[/]")
 
 
+def _packages_for_kind(state: MenuState, target_kind: str) -> List[str]:
+    return [
+        pkg
+        for pkg in state.queue_packages
+        if any(t.display_name == pkg and t.kind == target_kind for t in state.build_queue)
+    ]
+
+
+def review_completed_packages(state: MenuState, target_kind: str) -> None:
+    packages = _packages_for_kind(state, target_kind)
+    if not packages:
+        return
+    completed = [pkg for pkg in packages if state.package_status.get(pkg)]
+    pending = [pkg for pkg in packages if not state.package_status.get(pkg)]
+    if completed:
+        console.print("[cyan]已标记完成的包：[/] " + ", ".join(completed))
+    if pending and ask_confirm("是否需要在开始前标记更多已完成的包 (#)?", default=False):
+        auto_marked = auto_mark_prebuilt_packages(state.queue_file, state.code_dir)
+        if auto_marked:
+            state.load_queue_from_file()
+            console.print(f"[green]已自动标记完成: {', '.join(auto_marked)}[/]")
+        else:
+            console.print("[yellow]未发现已构建完成但未标记的包。[/]")
+    if completed and ask_confirm("是否需要移除某些包的完成标记 (#)?", default=False):
+        unselect = ask_checkbox("选择需要取消 # 的包", completed)
+        if unselect:
+            for pkg in unselect:
+                state.package_status[pkg] = False
+            state.save_queue()
+            console.print(f"[yellow]已取消 # 标记: {', '.join(unselect)}[/]")
+
+
+def optimize_debian_build_queue(state: MenuState) -> bool:
+    """Reorder Debian tasks using dependency-aware topological sort."""
+    state.load_queue_from_file()
+    # 先让用户同步已完成的包（打 #），避免重复构建
+    review_completed_packages(state, "debian")
+    state.load_queue_from_file()
+
+    debian_packages = [
+        task.display_name
+        for task in state.build_queue
+        if task.kind == "debian"
+    ]
+    if not debian_packages:
+        console.print("[yellow]当前队列中没有 Debian 构建任务，无法优化排序。[/]")
+        return False
+
+    pending_packages = [
+        pkg for pkg in state.queue_packages
+        if not state.package_status.get(pkg)
+        and any(t.display_name == pkg and t.kind == "debian" for t in state.build_queue)
+    ]
+    if not pending_packages:
+        console.print("[cyan]没有待构建的 Debian 包，已全部标记为完成。[/]")
+        return True
+
+    existing_entries = [
+        (task.display_name, task.path)
+        for task in state.build_queue
+        if task.kind == "debian"
+    ]
+    package_dirs = discover_debian_package_dirs(state.code_dir, existing_entries)
+    if not package_dirs:
+        console.print("[red]未找到任何包含 debian/control 的源码包，无法构建依赖图。[/]")
+        return False
+    order_hint = {pkg: idx for idx, pkg in enumerate(state.queue_packages)}
+    try:
+        series, unresolved = compute_series_toposort(
+            package_dirs, pending_packages, order_hint=order_hint
+        )
+    except KeyError as exc:
+        console.print(f"[red]依赖分析失败: {exc}[/]")
+        return False
+    except ValueError as exc:
+        console.print(f"[red]检测到依赖环，无法优化排序: {exc}[/]")
+        return False
+    if unresolved:
+        console.print("[yellow]发现未在源码目录中找到的依赖（未加入队列）：[/] " + ", ".join(sorted(unresolved)))
+        console.print("[yellow]请确认这些依赖是否存在于本地源码目录，并确保 debian/control 可被扫描。[/]")
+
+    # 拆成多个弱连通系列，组件间可并行；组件内保持拓扑序
+    optimized_order: List[str] = []
+    for idx, comp in enumerate(series, start=1):
+        console.print(f"[cyan]系列 {idx}（{len(comp)} 个包，可并行于其他系列）：[/] " + ", ".join(comp))
+        for pkg in comp:
+            if pkg not in optimized_order:
+                optimized_order.append(pkg)
+
+    # 已完成的包保持在前（保持原顺序），未完成的按拓扑排序，其余尾部保持
+    completed_prefix = [pkg for pkg in state.queue_packages if state.package_status.get(pkg)]
+    seen: Set[str] = set(optimized_order)
+    tail = [pkg for pkg in state.queue_packages if pkg not in seen and pkg not in completed_prefix]
+    state.queue_packages = completed_prefix + optimized_order + tail
+
+    existing_task_keys = {(task.display_name, task.kind) for task in state.build_queue}
+    added_packages: List[str] = []
+    for pkg in optimized_order:
+        key = (pkg, "debian")
+        if key in existing_task_keys:
+            continue
+        pkg_path = package_dirs.get(pkg)
+        if not pkg_path:
+            console.print(f"[yellow]跳过缺少路径的依赖包 {pkg}[/]")
+            continue
+        state.build_queue.append(BuildTask(pkg, pkg_path, "debian", []))
+        existing_task_keys.add(key)
+        added_packages.append(pkg)
+
+    for pkg in optimized_order:
+        state.package_status.setdefault(pkg, False)
+    order_map = {pkg: idx for idx, pkg in enumerate(state.queue_packages)}
+    state.build_queue.sort(
+        key=lambda task: (
+            order_map.get(task.display_name, len(order_map)),
+            0 if task.kind == "debian" else 1,
+        )
+    )
+    state.save_queue()
+    if added_packages:
+        console.print(f"[green]已将依赖包加入队列: {', '.join(added_packages)}[/]")
+    console.print(f"[green]Debian 构建队列已按依赖拓扑排序并写入: {state.queue_file}[/]")
+    return True
+
+def ros2agiros_menu(state: MenuState) -> None:
+    while True:
+        scope = ask_select("请选择操作范围", ["单包", f"批量:{state.code_dir}", "返回"])
+        if scope in (None, "返回"):
+            return
+        if scope == "单包":
+            pkg_path = prompt_package_path(state)
+            if not pkg_path:
+                continue
+            change_ros2agiros_tag(pkg_path, from_str=state.ros2_distro, to_str=state.agiros_distro)
+        else:
+            change_ros2agiros_tag(state.code_dir, from_str=state.ros2_distro, to_str=state.agiros_distro)
+        
+
 def build_bloom_command(state: MenuState, kind: str) -> List[str]:
     base = shlex_split(state.bloom_bin)
     if not base:
@@ -723,26 +949,26 @@ def run_single_bloom(state: MenuState, kind: str, package_path: Path, generate_g
     if kind == "rpm" and "agirosrpm" not in cmd and "generate_cmd" not in " ".join(cmd):
         cmd.append("agirosrpm")
     if kind in {"debian", "gbp"}:
-        cmd += ["--ros-distro", state.ros_distro, "--os-name", "ubuntu", "--os-version", state.ubuntu_version]
+        cmd += ["--ros-distro", state.agiros_distro, "--os-name", "ubuntu", "--os-version", state.ubuntu_version]
         if generate_gbp:
             cmd.append("--generate-gbp")
-            cmd += ["--tracks-distro", state.tracks_distro]
-            cmd += ["--distro", state.ros_distro]
+            cmd += ["--tracks-distro", state.ros2_distro]
+            cmd += ["--distro", state.agiros_distro]
             cmd += ["--pkg", package_path.name]
     else:
-        cmd += ["--ros-distro", state.ros_distro, "--os-name", "openeuler", "--os-version", state.openeuler_default]
-    env = os.environ.copy()
+        cmd += ["--ros-distro", state.agiros_distro, "--os-name", "openeuler", "--os-version", state.openeuler_default]
+    env = state.build_env()
     if generate_gbp:
         env["OOB_TRACKS_DIR"] = str(state.release_dir)
-        env["OOB_TRACKS_DISTRO"] = state.tracks_distro
-        env["AGIROS_DISTRO"] = state.ros_distro
+        env["OOB_TRACKS_DISTRO"] = state.ros2_distro
+        env["AGIROS_DISTRO"] = state.agiros_distro
     rc = run_stream(cmd, cwd=package_path, env=env)
     if rc == 0:
         console.print("[green]完成[/]")
 
 
 def run_batch_bloom(state: MenuState, mode: str) -> None:
-    script = REPO_ROOT / "agiros_oob_builder_procedural.py"
+    script = REPO_ROOT / "oob_builder_procedural.py"
     if not script.exists():
         console.print(f"[bold red]未找到 {script}[/]")
         return
@@ -756,7 +982,7 @@ def run_batch_bloom(state: MenuState, mode: str) -> None:
         "--code-dir",
         str(state.code_dir),
         "--ros-distro",
-        state.ros_distro,
+        state.agiros_distro,
         "--ubuntu-default",
         state.ubuntu_version,
         "--openeuler-default",
@@ -779,7 +1005,7 @@ def run_batch_bloom(state: MenuState, mode: str) -> None:
         cmd.append("--dry-run")
     if mode != "gbp" and state.auto_generate_gbp:
         cmd.append("--generate-gbp")
-    run_stream(cmd, cwd=REPO_ROOT, env=os.environ.copy())
+    run_stream(cmd, cwd=REPO_ROOT, env=state.build_env())
 
 
 def bloom_menu(state: MenuState) -> None:
@@ -830,9 +1056,224 @@ def describe_build_task(task: BuildTask, state: MenuState) -> str:
     return f"{task.display_name} ({task.kind}) - {pretty_path}"
 
 
-def run_debian_build(state: MenuState, path: Path, extra_args: Optional[List[str]] = None) -> int:
+def run_debuild_install(state: MenuState, path: Path) -> int:
+    script = REPO_ROOT / "deb_install_any.py"
+    if not script.exists():
+        console.print(f"[bold red]未找到 {script}[/]")
+        return 1
+    cmd = [sys.executable, str(script), "--work-dir", str(path)]
+    return run_stream(cmd, cwd=path, env=state.build_env())
+
+
+def apply_deb_build_options(env: Dict[str, str], parallel_hint: Optional[str], run_tests: bool) -> None:
+    """Ensure DEB_BUILD_OPTIONS keeps parallel hint and adds nocheck when skipping tests."""
+    options = [item for item in env.get("DEB_BUILD_OPTIONS", "").split() if item]
+    if parallel_hint:
+        parallel_token = f"parallel={parallel_hint}"
+        if not any(opt.startswith("parallel=") for opt in options):
+            options.append(parallel_token)
+    if not run_tests and "nocheck" not in options:
+        options.append("nocheck")
+    if options:
+        env["DEB_BUILD_OPTIONS"] = " ".join(options)
+
+
+def yaml_quote(value: str) -> str:
+    return json.dumps(value, ensure_ascii=True)
+
+
+def resolve_colcon_src_dir(state: "MenuState") -> str:
+    if state.colcon_src_dir:
+        candidate = state.code_dir / state.colcon_src_dir
+        if candidate.exists():
+            return state.colcon_src_dir
+    return "src" if (state.code_dir / "src").exists() else "."
+
+
+def docker_socket_available() -> bool:
+    if os.environ.get("DOCKER_HOST"):
+        return True
+    sock = Path("/var/run/docker.sock")
+    try:
+        return sock.exists() and sock.is_socket()
+    except Exception:
+        return sock.exists()
+
+
+def ensure_cargo_bin_on_path(env: Dict[str, str]) -> None:
+    cargo_bin = str(Path.home() / ".cargo" / "bin")
+    path_value = env.get("PATH", "")
+    if cargo_bin and cargo_bin not in path_value.split(":"):
+        env["PATH"] = f"{cargo_bin}:{path_value}" if path_value else cargo_bin
+
+
+def write_colcon_deb_config(
+    state: MenuState,
+    config_path: Path,
+    docker_image: str,
+    parallel_jobs: int,
+) -> None:
+    debian_dirs = state.code_dir / "debian_dirs"
+    lines = [
+        f"colcon_repo: {yaml_quote(str(state.code_dir))}",
+        f"debian_dirs: {yaml_quote(str(debian_dirs))}",
+        "docker:",
+        f"  image: {yaml_quote(docker_image)}",
+        f"ros_distro: {yaml_quote(state.deb_distro)}",
+        f"output_dir: {yaml_quote(str(state.deb_out_dir))}",
+        f"parallel_jobs: {parallel_jobs}",
+        "",
+    ]
+    config_path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def resolve_colcon_deb_runner(tool_root: Path) -> Optional[List[str]]:
+    env_bin = os.environ.get("COLCON_DEB_BIN")
+    if env_bin:
+        return [env_bin]
+    for candidate in (
+        tool_root / "target" / "release" / "colcon-deb",
+        tool_root / "target" / "debug" / "colcon-deb",
+    ):
+        if candidate.exists():
+            return [str(candidate)]
+    if shutil.which("colcon-deb"):
+        return ["colcon-deb"]
+    if shutil.which("cargo"):
+        manifest = tool_root / "Cargo.toml"
+        if manifest.exists():
+            return ["cargo", "run", "--bin", "colcon-deb", "--manifest-path", str(manifest), "--"]
+    return None
+
+
+def auto_build_colcon_deb(state: MenuState, tool_root: Path) -> bool:
+    if not shutil.which("cargo"):
+        console.print("[red]未找到 cargo，无法自动构建 colcon-deb。请安装 Rust 或设置 COLCON_DEB_BIN。[/]")
+        return False
+    manifest = tool_root / "Cargo.toml"
+    if not manifest.exists():
+        console.print(f"[red]未找到 {manifest}，无法自动构建。[/]")
+        return False
+    console.print("[cyan]正在自动构建 colcon-deb...[/]")
+    env = state.build_env()
+    rc = run_stream(
+        ["cargo", "build", "--release", "--bin", "colcon-deb", "--manifest-path", str(manifest)],
+        cwd=tool_root,
+        env=env,
+    )
+    return rc == 0
+
+
+def run_colcon_deb_fallback_build(state: MenuState) -> int:
+    tool_root = REPO_ROOT / "colcon-debian-packager"
+    orchestrator = tool_root / "scripts" / "helpers" / "build-orchestrator.rs"
+    if not orchestrator.exists():
+        console.print(f"[red]未找到 build-orchestrator: {orchestrator}[/]")
+        return 1
+    env = state.build_env()
+    ensure_cargo_bin_on_path(env)
+    if not shutil.which("rust-script"):
+        if shutil.which("cargo") and ask_confirm("未找到 rust-script，是否使用 cargo 安装?", default=True):
+            rc = run_stream(
+                ["cargo", "install", "rust-script", "--version", "0.35.0"],
+                cwd=tool_root,
+                env=env,
+            )
+            if rc != 0:
+                return rc
+        else:
+            console.print("[red]未找到 rust-script，无法执行 build-orchestrator。[/]")
+            return 1
+    env.setdefault("ROS_DISTRO", state.deb_distro)
+    env.setdefault("PARALLEL_JOBS", str(state.deb_parallel))
+    src_dir = resolve_colcon_src_dir(state)
+    env["COLCON_SRC_DIR"] = src_dir
+    env.setdefault("COLCON_HELPERS_DIR", str(tool_root / "scripts" / "helpers"))
+    env.setdefault("COLCON_SCRIPTS_DIR", str(tool_root / "scripts"))
+    cmd = [
+        "rust-script",
+        str(orchestrator),
+        "--workspace",
+        str(state.code_dir),
+        "--src-dir",
+        src_dir,
+        "--queue-file",
+        str(state.queue_file),
+        "--debian-dirs",
+        str(state.code_dir / "debian_dirs"),
+        "--output-dir",
+        str(state.deb_out_dir),
+    ]
+    console.print("[yellow]未检测到 Docker daemon，使用本地 build-orchestrator 执行并行构建。[/]")
+    return run_stream(cmd, cwd=tool_root, env=env)
+
+
+def run_colcon_deb_parallel_build(state: MenuState) -> int:
+    tool_root = REPO_ROOT / "colcon-debian-packager"
+    if not tool_root.exists():
+        console.print(f"[red]未找到 colcon-debian-packager: {tool_root}[/]")
+        return 1
+    if not state.code_dir.exists():
+        console.print(f"[red]源码目录不存在: {state.code_dir}[/]")
+        return 1
+    if not docker_socket_available() or os.environ.get("COLCON_DEB_FORCE_FALLBACK") == "1":
+        return run_colcon_deb_fallback_build(state)
+    config_path = REPO_ROOT / "colcon-deb.build-tools.yaml"
+    docker_image = os.environ.get("COLCON_DEB_IMAGE", f"colcon-deb:{state.deb_distro}")
+    try:
+        parallel_jobs = int(state.deb_parallel)
+    except ValueError:
+        parallel_jobs = os.cpu_count() or 4
+    write_colcon_deb_config(state, config_path, docker_image, parallel_jobs)
+    runner = resolve_colcon_deb_runner(tool_root)
+    if not runner:
+        if not auto_build_colcon_deb(state, tool_root):
+            return 1
+        runner = resolve_colcon_deb_runner(tool_root)
+        if not runner:
+            console.print("[red]自动构建完成但仍未找到 colcon-deb，可设置 COLCON_DEB_BIN。[/]")
+            return 1
+    cmd = runner + ["-c", str(config_path), "build", "--output", str(state.deb_out_dir)]
+    if parallel_jobs:
+        cmd += ["-j", str(parallel_jobs)]
+    cmd += ["--agiros-distro", state.deb_distro]
+    env = state.build_env()
+    env.setdefault("ROS_DISTRO", state.deb_distro)
+    env["COLCON_SRC_DIR"] = resolve_colcon_src_dir(state)
+    return run_stream(cmd, cwd=tool_root, env=env)
+
+
+def run_debian_build(
+    state: MenuState,
+    path: Path,
+    extra_args: Optional[List[str]] = None,
+    builder: str = "gbp",
+    auto_install: bool = False,
+    run_tests: bool = True,
+) -> int:
+    if builder == "debuild":
+        script = REPO_ROOT / "debuild_runner.py"
+        if not script.exists():
+            console.print(f"[bold red]未找到 {script}[/]")
+            return 1
+        env = state.build_env()
+        env.setdefault("WORK_DIR", str(path))
+        env.setdefault("PARALLEL", state.deb_parallel)
+        apply_deb_build_options(env, env.get("PARALLEL", state.deb_parallel), run_tests)
+        cmd: List[str] = [sys.executable, str(script), "--work-dir", str(path)]
+        if extra_args:
+            cmd.append("--")
+            cmd.extend(extra_args)
+        rc = run_stream(cmd, cwd=path, env=env)
+        if rc == 0 and auto_install:
+            install_rc = run_debuild_install(state, path)
+            if install_rc != 0:
+                console.print("[red]安装失败[/]")
+                return install_rc
+        return rc
+
     script = REPO_ROOT / "git_build_any.py"
-    env = os.environ.copy()
+    env = state.build_env()
     if script.exists():
         env.setdefault("WORK_DIR", str(path))
         env.setdefault("CODE_DIR", str(state.code_dir))
@@ -842,6 +1283,7 @@ def run_debian_build(state: MenuState, path: Path, extra_args: Optional[List[str
         env.setdefault("PARALLEL", state.deb_parallel)
         env.setdefault("GIT_USER_NAME", state.git_user_name)
         env.setdefault("GIT_USER_EMAIL", state.git_user_email)
+        apply_deb_build_options(env, env.get("PARALLEL", state.deb_parallel), run_tests)
         while True:
             rc = run_stream([sys.executable, str(script)], cwd=path, env=env)
             if rc == 0:
@@ -861,13 +1303,21 @@ def run_debian_build(state: MenuState, path: Path, extra_args: Optional[List[str
     cmd = ["gbp", "buildpackage"] + state.debian_build_args
     if extra_args:
         cmd += extra_args
-    env = os.environ.copy()
+    env = state.build_env()
+    apply_deb_build_options(env, state.deb_parallel, run_tests)
     return run_stream(cmd, cwd=path, env=env)
 
 
-def run_rpm_build(state: MenuState, path: Path, extra_args: Optional[List[str]] = None) -> int:
+def run_rpm_build(
+    state: MenuState,
+    path: Path,
+    extra_args: Optional[List[str]] = None,
+    run_tests: bool = True,
+) -> int:
     script = REPO_ROOT / "rpmbuild_any.py"
-    env = os.environ.copy()
+    env = state.build_env()
+    if not run_tests:
+        env["AGIROS_SKIP_TESTS"] = "1"
     if script.exists():
         env.setdefault("WORK_DIR", str(path))
         env.setdefault("CODE_DIR", str(state.code_dir))
@@ -894,23 +1344,39 @@ def run_rpm_build(state: MenuState, path: Path, extra_args: Optional[List[str]] 
         return 1
     rc = 0
     for spec in specs:
-        cmd = [state.rpm_build_base] + state.rpm_build_args + [str(spec)]
+        cmd = [state.rpm_build_base] + state.rpm_build_args
+        if not run_tests and "--nocheck" not in cmd:
+            cmd.append("--nocheck")
+        cmd.append(str(spec))
         if extra_args:
             cmd += extra_args
-        rc = run_stream(cmd, cwd=path, env=os.environ.copy())
+        rc = run_stream(cmd, cwd=path, env=env)
         if rc != 0:
             break
     return rc
 
 
-def execute_build(task: BuildTask, state: MenuState) -> bool:
+def execute_build(
+    task: BuildTask,
+    state: MenuState,
+    debian_builder: str = "gbp",
+    auto_install: bool = False,
+    run_tests: bool = True,
+) -> bool:
     console.print(Panel(f"开始构建: {describe_build_task(task, state)}", box=box.ROUNDED))
     success = True
     if task.kind == "debian":
-        if run_debian_build(state, task.path, task.extra_args) != 0:
+        if run_debian_build(
+            state,
+            task.path,
+            task.extra_args,
+            builder=debian_builder,
+            auto_install=auto_install,
+            run_tests=run_tests,
+        ) != 0:
             success = False
     elif task.kind == "rpm":
-        if run_rpm_build(state, task.path, task.extra_args) != 0:
+        if run_rpm_build(state, task.path, task.extra_args, run_tests=run_tests) != 0:
             success = False
     else:
         console.print(f"[red]未知的构建类型: {task.kind}[/]")
@@ -974,39 +1440,124 @@ def manage_build_queue(state: MenuState) -> None:
             if not state.queue_packages:
                 console.print("[cyan]队列为空[/]")
                 continue
-            pending = [pkg for pkg in state.queue_packages if not state.package_status.get(pkg)]
-            if not pending:
-                console.print("[cyan]所有包均已标记完成 (#)，如需重新构建请先移除或重新加入。[/]")
+            build_choice = ask_select("选择构建类型", ["构建 Debian 包", "构建 RPM 包"])
+            if build_choice is None:
                 continue
+            target_kind = "debian" if build_choice == "构建 Debian 包" else "rpm"
+            run_tests = True
+            review_completed_packages(state, target_kind)
+            auto_install_deb = False
+            if target_kind == "debian":
+                mode = ask_select("选择 Debian 编译方式", ["单线程编译", "并行编译", "返回"])
+                if mode in (None, "返回"):
+                    continue
+                pending = [
+                    pkg
+                    for pkg in state.queue_packages
+                    if not state.package_status.get(pkg)
+                    and any(t.display_name == pkg and t.kind == "debian" for t in state.build_queue)
+                ]
+                if mode == "并行编译":
+                    if not pending:
+                        console.print("[cyan]没有待构建的 Debian 包，可通过扫描/添加任务生成。[/]")
+                        continue
+                    console.print("[cyan]并行编译将使用 colcon-debian-packager 构建整个工作区。[/]")
+                    if not ask_confirm("继续执行并行编译吗?", default=True):
+                        continue
+                    rc = run_colcon_deb_parallel_build(state)
+                    if rc == 0:
+                        state.load_queue_from_file()
+                        console.print("[green]并行构建完成，队列已按已构建包自动更新。[/]")
+                    continue
+                auto_install_deb = ask_confirm("构建成功后自动安装生成的 deb 包吗?", default=False)
+                while True:
+                    pending = [
+                        pkg
+                        for pkg in state.queue_packages
+                        if not state.package_status.get(pkg)
+                        and any(t.display_name == pkg and t.kind == "debian" for t in state.build_queue)
+                    ]
+                    if not pending:
+                        console.print("[cyan]没有待构建的 Debian 包，可通过扫描/添加任务生成。[/]")
+                        break
+                    options = [
+                        "使用 git-buildpackage (gbp)",
+                        "使用 debuild -us -uc -b",
+                        "优化排序",
+                    ]
+                    selection = ask_select("选择 Debian 构建方式", options)
+                    if selection == "优化排序":
+                        optimize_debian_build_queue(state)
+                        continue
+                    if selection == "使用 debuild -us -uc -b":
+                        debian_builder = "debuild"
+                        run_tests = ask_confirm("构建时需要运行测试吗？选择“否”将仅编译并跳过测试。", default=True)
+                    else:
+                        debian_builder = "gbp"
+                        run_tests = True
+                    break
+                if not pending:
+                    continue
+            else:
+                pending = [
+                    pkg
+                    for pkg in state.queue_packages
+                    if any(t.display_name == pkg and t.kind == "rpm" for t in state.build_queue)
+                ]
+                if not pending:
+                    console.print("[cyan]队列中没有可构建的 RPM 包。[/]")
+                    continue
+                debian_builder = "gbp"  # unused for RPM tasks
+
             failed_packages: List[str] = []
             aborted = False
-            for pkg in state.queue_packages:
-                tasks_for_pkg = [task for task in state.build_queue if task.display_name == pkg]
-                if not tasks_for_pkg:
-                    continue
-                if state.package_status.get(pkg):
-                    console.print(f"[cyan]{pkg} 已标记完成，跳过[/]")
-                    continue
-                package_failed = False
-                for task in tasks_for_pkg:
-                    if not execute_build(task, state):
-                        package_failed = True
-                        break
-                if package_failed:
-                    failed_packages.append(pkg)
-                    state.package_status[pkg] = False
-                    if not ask_confirm("继续执行剩余包?", default=True):
-                        aborted = True
-                        break
-                else:
-                    state.package_status[pkg] = True
-            state.save_queue()
+            queue_snapshot = list(state.queue_packages)
+            try:
+                for pkg in queue_snapshot:
+                    if pkg not in pending:
+                        continue
+                    tasks_for_pkg = [
+                        task
+                        for task in state.build_queue
+                        if task.display_name == pkg and task.kind == target_kind
+                    ]
+                    if not tasks_for_pkg:
+                        continue
+                    if target_kind == "debian" and state.package_status.get(pkg):
+                        console.print(f"[cyan]{pkg} 已标记完成，跳过")
+                        continue
+                    package_failed = False
+                    for task in tasks_for_pkg:
+                        if not execute_build(
+                            task,
+                            state,
+                            debian_builder=debian_builder,
+                            auto_install=auto_install_deb,
+                            run_tests=run_tests,
+                        ):
+                            package_failed = True
+                            break
+                    if package_failed:
+                        failed_packages.append(pkg)
+                        if target_kind == "debian":
+                            state.package_status[pkg] = False
+                        if not ask_confirm("继续执行剩余包?", default=True):
+                            aborted = True
+                            break
+                    else:
+                        if target_kind == "debian":
+                            state.package_status[pkg] = True
+                    state.save_queue()
+            except KeyboardInterrupt:
+                aborted = True
+                console.print("[yellow]已接收到暂停请求 (Ctrl+C)，当前进度已保存，可稍后继续。[/]")
+
             if failed_packages:
-                console.print("[yellow]以下包构建失败，已保持未完成状态：[/]")
+                console.print("[yellow]以下包构建失败：[/]")
                 for pkg in failed_packages:
                     console.print(f"- {pkg}")
-            if not failed_packages and not aborted:
-                console.print("[green]队列包均已成功构建并标记为 #[/]")
+            if target_kind == "debian" and not failed_packages and not aborted:
+                console.print("[green]选定的 Debian 包已成功构建并标记为 #[/]")
         elif choice == "清空队列":
             state.clear_queue()
             console.print("[yellow]构建队列已清空[/]")
@@ -1040,7 +1591,7 @@ def handle_clean(state: MenuState) -> None:
     if not script.exists():
         console.print(f"[red]未找到 {script}[/]")
         return
-    env = os.environ.copy()
+    env = state.build_env()
     env["CODE_DIR"] = str(state.code_dir)
     rc = run_stream([sys.executable, str(script)], cwd=REPO_ROOT, env=env)
     if rc == 0:
@@ -1131,6 +1682,7 @@ def handle_configuration(state: MenuState) -> None:
             [
                 "修改 Release 目录",
                 "修改 源码目录",
+                 "修改 安装前缀",
                 "修改 distribution.yaml URL",
                 "修改 ROS/Tracks 配置",
                 "修改 openEuler 参数",
@@ -1150,16 +1702,20 @@ def handle_configuration(state: MenuState) -> None:
             value = ask_text("新的源码目录", str(state.code_dir))
             if value:
                 state.code_dir = Path(value).expanduser().resolve()
+        elif choice == "修改 安装前缀":
+            value = ask_text("新的安装前缀目录", str(state.install_prefix))
+            if value:
+                state.install_prefix = Path(value).expanduser().resolve()
         elif choice == "修改 distribution.yaml URL":
             value = ask_text("新的 URL", state.distribution_url)
             if value:
                 state.distribution_url = value
         elif choice == "修改 ROS/Tracks 配置":
-            ros = ask_text("ROS 发行版", state.ros_distro)
-            tracks = ask_text("Tracks 发行版", state.tracks_distro)
+            ros = ask_text("AGIROS 发行版", state.agiros_distro)
+            tracks = ask_text("ROS2 发行版", state.ros2_distro)
             ubuntu = ask_text("Ubuntu 版本", state.ubuntu_version)
-            state.ros_distro = ros or state.ros_distro
-            state.tracks_distro = tracks or state.tracks_distro
+            state.agiros_distro = ros or state.agiros_distro
+            state.ros2_distro = tracks or state.ros2_distro
             state.ubuntu_version = ubuntu or state.ubuntu_version
         elif choice == "修改 openEuler 参数":
             default = ask_text("openEuler 默认版本", state.openeuler_default)
@@ -1189,6 +1745,16 @@ def handle_configuration(state: MenuState) -> None:
             distro = ask_text("Debian DISTRO (gbp release_tag 用)", state.deb_distro)
             release_inc = ask_text("默认 release_inc", state.deb_release_inc)
             parallel = ask_text("并行线程数", state.deb_parallel)
+            colcon_src = ask_text("COLCON_SRC_DIR (相对源码目录, 留空=自动)", state.colcon_src_dir)
+            apt_source = ask_text("AGIROS APT 源行 (留空=不设置)", state.agiros_apt_source)
+            apt_source_file = ask_text(
+                "AGIROS APT 源文件路径",
+                str(state.agiros_apt_source_file),
+            )
+            auto_fix = ask_confirm(
+                "缺失依赖时自动修复 (apt-get -f install)?",
+                default=state.auto_fix_deps,
+            )
             git_name = ask_text("Git 提交用户名", state.git_user_name)
             git_email = ask_text("Git 提交邮箱", state.git_user_email)
             if code_label:
@@ -1201,6 +1767,13 @@ def handle_configuration(state: MenuState) -> None:
                 state.deb_release_inc = release_inc
             if parallel:
                 state.deb_parallel = parallel
+            if colcon_src is not None:
+                state.colcon_src_dir = colcon_src.strip()
+            if apt_source is not None:
+                state.agiros_apt_source = apt_source
+            if apt_source_file:
+                state.agiros_apt_source_file = Path(apt_source_file).expanduser().resolve()
+            state.auto_fix_deps = auto_fix
             if git_name:
                 state.git_user_name = git_name
             if git_email:
@@ -1209,32 +1782,59 @@ def handle_configuration(state: MenuState) -> None:
 
 
 def gather_log_candidates(state: MenuState) -> List[Path]:
-    candidates = [
-        state.release_dir / "download_log.txt",
-        state.release_dir / "failed_repos.txt",
-        REPO_ROOT / "fail.log",
-    ]
-    return [path for path in candidates if path.exists()]
+    candidates: List[Path] = []
+    seen: Set[str] = set()
+
+    def _add(path: Path) -> None:
+        try:
+            resolved = path.resolve()
+        except Exception:
+            resolved = path
+        key = str(resolved)
+        if key in seen:
+            return
+        if resolved.exists() and resolved.is_file():
+            candidates.append(resolved)
+            seen.add(key)
+
+    base_dirs = [state.release_dir, state.code_dir, REPO_ROOT]
+    names = ["download_log.txt", "failed_repos.txt", "fail.log"]
+    patterns = ["*.log", "*log*.txt"]
+
+    for base in base_dirs:
+        if not base or not base.exists():
+            continue
+        for name in names:
+            _add(base / name)
+        for pattern in patterns:
+            for path in base.glob(pattern):
+                _add(path)
+
+    return sorted(candidates, key=lambda p: str(p))
 
 
 def handle_logs(state: MenuState) -> None:
-    logs = gather_log_candidates(state)
-    options = [str(p) for p in logs] + ["自定义路径", "返回"]
-    choice = ask_select("查看日志", options)
-    if choice in (None, "返回"):
-        return
-    if choice == "自定义路径":
-        path_str = ask_text("输入日志文件路径", "")
-    else:
-        path_str = choice
-    if not path_str:
-        return
-    path = Path(path_str).expanduser()
-    if not path.exists():
-        console.print(f"[red]未找到 {path}[/]")
-        return
-    content = path.read_text(encoding="utf-8", errors="ignore")
-    console.print(Panel(Text(content if len(content) < 4000 else content[-4000:], style="white"), title=str(path), box=box.ROUNDED))
+    while True:
+        logs = gather_log_candidates(state)
+        options = [str(p) for p in logs] + ["自定义路径", "返回"]
+        choice = ask_select("查看日志", options)
+        if choice in (None, "返回"):
+            return
+        if choice == "自定义路径":
+            path_str = ask_text("输入日志文件路径", "")
+        else:
+            path_str = choice
+        if not path_str:
+            continue
+        path = Path(path_str).expanduser()
+        if not path.exists():
+            console.print(f"[red]未找到 {path}[/]")
+            continue
+        content = path.read_text(encoding="utf-8", errors="ignore")
+        console.print(Panel(Text(content if len(content) < 4000 else content[-4000:], style="white"), title=str(path), box=box.ROUNDED))
+        action = ask_select("日志查看", ["返回", "继续查看"])
+        if action in (None, "返回"):
+            return
 
 
 def main() -> None:
@@ -1245,8 +1845,9 @@ def main() -> None:
         choice = ask_select(
             "请选择操作",
             [
-                "下载 release 仓库",
+                "从distribution.yaml下载release仓库（tracks）或源码（code）",
                 "处理 tracks.yaml / 下载源码",
+                "源码替换ros->agiros",
                 "Bloom 打包",
                 "构建 (Build)",
                 "清理生成目录",
@@ -1255,10 +1856,12 @@ def main() -> None:
                 "退出",
             ],
         )
-        if choice == "下载 release 仓库":
+        if choice == "从distribution.yaml下载release仓库（tracks）或源码（code）":
             handle_download_release(state)
         elif choice == "处理 tracks.yaml / 下载源码":
             handle_tracks_download(state)
+        elif choice == "源码替换ros->agiros":
+            ros2agiros_menu(state)
         elif choice == "Bloom 打包":
             bloom_menu(state)
         elif choice == "构建 (Build)":
