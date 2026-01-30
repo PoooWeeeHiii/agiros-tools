@@ -206,7 +206,8 @@ class Planner:
             self.logger.warn(f"[{repo_name}] 缺少 vcs_uri")
             return None
 
-        branch_or_tag = track.get("devel_branch") or track.get("version") or "main"
+        # branch_or_tag = track.get("devel_branch") or track.get("version") or "main"
+        branch_or_tag = track.get("last_version") or track.get("devel_branch") or "main"
         return RepoPlan(repo_name, upstream_url, branch_or_tag)
 
 
@@ -217,21 +218,68 @@ class GitDownloader:
         self.sh = Shell(logger)
         self.helper = GitHelper(logger, self.sh)
 
-    def clone(self, url: str, dest: str, branch_or_tag: Optional[str]) -> bool:
-        os.makedirs(os.path.dirname(dest), exist_ok=True)
+    def clone1(self, url: str, dest: str, branch_or_tag: Optional[str]) -> bool:
+        os.makedirs(dest, exist_ok=True)
 
         if os.path.isdir(os.path.join(dest, ".git")):
             self.logger.info(f"[更新] {dest}")
-            self.sh.run(["git", "fetch", "--all"], cwd=dest)
+            rc, _, err = self.sh.run(["git", "fetch", "--all"], cwd=dest)
+            if rc != 0:
+                self.logger.error(f"git fetch 失败: {err.strip()}")
+                return False
         else:
             self.logger.info(f"[克隆] {url} → {dest}")
-            rc, _, err = self.sh.run(["git", "clone", url, dest])
+            
+            clone_cmd = ["git", "clone"]
+            if branch_or_tag:
+                clone_cmd += ["-b", branch_or_tag]
+            clone_cmd += [url, dest]
+            rc, _, err = self.sh.run(clone_cmd)
+
+            if rc != 0:
+                self.logger.error(f"git clone 失败: {err.strip()}")
+                return False
+                return False
+
+        if branch_or_tag:
+            return self.helper.safe_checkout(dest, branch_or_tag)
+        else:
+            self.logger.info(f"未指定分支或标签，跳过 checkout: {dest}")
+            return True
+
+
+    def clone(self, url: str, dest: str, branch_or_tag: Optional[str]) -> bool:
+        os.makedirs(dest, exist_ok=True)
+
+        rc, out, err = self.sh.run(["git", "rev-parse", "--is-inside-work-tree"], cwd=dest)
+        if rc == 0 and out.strip() == "true":
+            return True  # 已是 git 仓库，跳过
+            
+            self.logger.info(f"[更新] {dest}")
+            rc_fetch, _, err_fetch = self.sh.run(["git", "fetch", "--all"], cwd=dest)
+            if rc_fetch != 0:
+                self.logger.error(f"git fetch 失败: {err_fetch.strip()}")
+                return False
+            # 只有在更新已有仓库时才需要 safe_checkout
+            if branch_or_tag:
+                return self.helper.safe_checkout(dest, branch_or_tag)
+            else:
+                self.logger.info(f"未指定分支或标签，跳过 checkout: {dest}")
+                return True
+        else:
+            self.logger.info(f"[克隆] {url} TAG:{branch_or_tag} → {dest}")
+            clone_cmd = ["git", "clone"]
+            if branch_or_tag:
+                clone_cmd += ["-b", branch_or_tag]
+            clone_cmd += [url, dest]
+            rc, _, err = self.sh.run(clone_cmd)
+
             if rc != 0:
                 self.logger.error(f"git clone 失败: {err.strip()}")
                 return False
 
-        return self.helper.safe_checkout(dest, branch_or_tag)
-
+        # 如果 clone 时已指定分支/tag，则无需再 checkout
+        return True
 
 # ----------------------------- Coordinator -----------------------------
 class RepoProcessor:
@@ -248,6 +296,11 @@ class RepoProcessor:
         repo_name = os.path.basename(repo_dir.rstrip(os.sep))
         section = self.parser.parse_file(os.path.join(repo_dir, "tracks.yaml"))
         if not section:
+            package_xml_path = os.path.join(repo_dir, "package.xml")
+            if(os.path.isfile(package_xml_path)):
+                self.logger.warn(f"发现 package.xml，可能是旧版 release 结构: {package_xml_path}")
+                #将repo_dir复制到self.code_dir
+                
             return False
 
         plan = self.planner.make_plan(repo_name, section)
@@ -288,7 +341,7 @@ class Runner:
         total = len(repos)
         ok = 0
         for idx, repo_dir in enumerate(repos, 1):
-            self.logger.info(f"({idx}/{total}) 处理: {os.path.basename(repo_dir)}")
+            self.logger.info(f"({idx}/{total}) >>>>>>>> 处理: {os.path.basename(repo_dir)}")
             try:
                 if self.proc.process_repo_dir(repo_dir):
                     ok += 1
