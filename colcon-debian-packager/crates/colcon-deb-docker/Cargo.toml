@@ -1,0 +1,27 @@
+[package]
+name = "colcon-deb-docker"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+description = "Docker integration for Colcon Debian Packager"
+
+[dependencies]
+colcon-deb-core = { path = "../colcon-deb-core" }
+bollard = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+futures = "0.3"
+bytes = "1.5"
+async-trait = "0.1"
+tar = "0.4"
+
+[dev-dependencies]
+tempfile = { workspace = true }

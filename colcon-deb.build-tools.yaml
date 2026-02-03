@@ -1,0 +1,7 @@
+colcon_repo: "/workspace/jazzy"
+debian_dirs: "/workspace/jazzy/debian_dirs"
+docker:
+  image: "colcon-deb:pixiu"
+ros_distro: "pixiu"
+output_dir: "/root/jazzy_2025-10-14_deb_out"
+parallel_jobs: 10

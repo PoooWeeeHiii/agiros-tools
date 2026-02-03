@@ -1,0 +1,56 @@
+# Rust formatting configuration
+
+# Use verbose diffs
+verbose = "Verbose"
+
+# Max line width
+max_width = 100
+
+# Use Unix-style line endings
+newline_style = "Unix"
+
+# Use spaces for indentation
+hard_tabs = false
+tab_spaces = 4
+
+# Brace style
+brace_style = "SameLineWhere"
+
+# Control flow
+control_brace_style = "AlwaysSameLine"
+
+# Function and method calls
+fn_call_width = 80
+
+# Structs and enums
+struct_lit_width = 60
+enum_discrim_align_threshold = 20
+
+# Imports
+imports_indent = "Block"
+imports_layout = "Mixed"
+group_imports = "StdExternalCrate"
+
+# Reordering
+reorder_impl_items = true
+reorder_imports = true
+reorder_modules = true
+
+# Spaces
+space_after_colon = true
+space_before_colon = false
+
+# Comments
+comment_width = 80
+wrap_comments = true
+normalize_comments = true
+
+# Other
+use_field_init_shorthand = true
+use_try_shorthand = true
+format_code_in_doc_comments = true
+format_macro_matchers = true
+format_strings = true
+
+# Edition-specific settings
+edition = "2021"

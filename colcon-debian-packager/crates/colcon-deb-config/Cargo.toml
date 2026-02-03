@@ -1,0 +1,21 @@
+[package]
+name = "colcon-deb-config"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+description = "Configuration management for Colcon Debian Packager"
+
+[dependencies]
+colcon-deb-core = { path = "../colcon-deb-core" }
+serde = { workspace = true }
+serde_yaml = { workspace = true }
+thiserror = { workspace = true }
+dirs = "5.0"
+regex = "1.10"
+
+[dev-dependencies]
+tempfile = { workspace = true }

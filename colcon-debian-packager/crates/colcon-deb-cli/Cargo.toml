@@ -1,0 +1,34 @@
+[package]
+name = "colcon-deb-cli"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+description = "CLI for Colcon Debian Packager"
+
+[[bin]]
+name = "colcon-deb"
+path = "src/main.rs"
+
+[dependencies]
+colcon-deb-core = { path = "../colcon-deb-core" }
+colcon-deb-config = { path = "../colcon-deb-config" }
+colcon-deb-docker = { path = "../colcon-deb-docker" }
+colcon-deb-build = { path = "../colcon-deb-build" }
+colcon-deb-ros = { path = "../colcon-deb-ros" }
+colcon-deb-debian = { path = "../colcon-deb-debian" }
+
+clap = { workspace = true }
+tokio = { workspace = true }
+eyre = { workspace = true }
+color-eyre = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+indicatif = { workspace = true }
+serde_yaml = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

@@ -1,0 +1,45 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>simple_subscriber</name>
+  <version>0.2.1</version>
+  <description>A simple ROS 2 subscriber node with dependencies</description>
+  
+  <maintainer email="sub_maintainer@example.com">Subscriber Maintainer</maintainer>
+  
+  <license>MIT</license>
+  <license>BSD</license>
+  
+  <url type="website">https://example.com/simple_subscriber</url>
+  
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  
+  <!-- Dependencies with version constraints -->
+  <build_depend version_gte="0.1.0">simple_publisher</build_depend>
+  <build_depend>rclcpp</build_depend>
+  <build_depend>std_msgs</build_depend>
+  <build_depend>sensor_msgs</build_depend>
+  <build_depend version_eq="1.2.0">geometry_msgs</build_depend>
+  
+  <!-- System dependencies -->
+  <build_depend>libboost-system-dev</build_depend>
+  <build_depend>python3-numpy</build_depend>
+  
+  <exec_depend version_gte="0.1.0">simple_publisher</exec_depend>
+  <exec_depend>rclcpp</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  
+  <!-- Conditional dependency -->
+  <build_depend condition="$ROS_DISTRO == loong">tf2_ros</build_depend>
+  
+  <test_depend>ament_cmake_gtest</test_depend>
+  <test_depend>ament_lint_auto</test_depend>
+  
+  <doc_depend>doxygen</doc_depend>
+  
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

@@ -1,0 +1,76 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/colcon-deb-cli",
+    "crates/colcon-deb-core",
+    "crates/colcon-deb-config",
+    "crates/colcon-deb-docker",
+    "crates/colcon-deb-ros",
+    "crates/colcon-deb-debian",
+    "crates/colcon-deb-build",
+]
+
+[workspace.package]
+version = "0.1.0"
+authors = ["Colcon Deb Contributors"]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/your-org/colcon-deb"
+homepage = "https://github.com/your-org/colcon-deb"
+rust-version = "1.75"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1.35", features = ["full"] }
+tokio-util = { version = "0.7", features = ["io"] }
+
+# Docker integration
+bollard = "0.15"
+
+# CLI
+clap = { version = "4.4", features = ["derive", "env"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+
+# Error handling
+thiserror = "1.0"
+eyre = "0.6"
+color-eyre = "0.6"
+
+# Logging and tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Progress UI
+indicatif = "0.17"
+crossterm = "0.27"
+
+# XML parsing for ROS packages
+quick-xml = { version = "0.31", features = ["serialize"] }
+
+# File system
+walkdir = "2.4"
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# String patterns
+regex = "1.10"
+
+# Testing
+tempfile = "3.8"
+proptest = "1.4"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+
+[profile.dev]
+opt-level = 0
+
+[profile.test]
+opt-level = 0

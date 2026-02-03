@@ -1,0 +1,41 @@
+[package]
+name = "colcon-deb-build"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+description = "Build orchestration for Colcon Debian Packager"
+
+[dependencies]
+colcon-deb-core = { path = "../colcon-deb-core" }
+colcon-deb-config = { path = "../colcon-deb-config" }
+colcon-deb-docker = { path = "../colcon-deb-docker" }
+colcon-deb-debian = { path = "../colcon-deb-debian" }
+colcon-deb-ros = { path = "../colcon-deb-ros" }
+tokio = { workspace = true, features = ["signal"] }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = "0.1"
+futures = "0.3"
+indicatif = { workspace = true }
+walkdir = { workspace = true }
+tar = "0.4"
+chrono = "0.4"
+tempfile = { workspace = true }
+atty = "0.2"
+backoff = "0.4"
+rand = "0.8"
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tracing-subscriber = { workspace = true }
+criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
+
+[[bench]]
+name = "orchestration_bench"
+harness = false

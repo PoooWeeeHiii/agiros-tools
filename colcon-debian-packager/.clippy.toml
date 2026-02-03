@@ -1,0 +1,16 @@
+# Clippy configuration
+
+# Set the MSRV (Minimum Supported Rust Version)
+msrv = "1.75"
+
+# Increase the maximum cognitive complexity threshold
+cognitive-complexity-threshold = 30
+
+# Allow larger functions for complex operations
+too-many-lines-threshold = 150
+
+# Increase the maximum number of arguments
+too-many-arguments-threshold = 8
+
+# Warn on TODO and FIXME comments
+warn-on-all-wildcard-imports = true

@@ -1,0 +1,83 @@
+version: '3.8'
+
+services:
+  colcon-deb-loong:
+    build:
+      context: .
+      dockerfile: base/Dockerfile
+      args:
+        BASE_IMAGE: ros:loong-ros-base
+    image: colcon-deb:loong
+    container_name: colcon-deb-loong
+    environment:
+      - ROS_DISTRO=loong
+      - LOCAL_USER_ID=${UID:-1000}
+      - INJECT_HELPERS=true
+      - TARGET_ARCHITECTURE=${TARGET_ARCH:-amd64}
+    volumes:
+      # Mount workspace
+      - ${WORKSPACE:-../}:/workspace:rw
+      # Mount helper scripts
+      - ../scripts/helpers:/opt/colcon-deb/helpers:ro
+      # Mount debian package output
+      - ${OUTPUT_DIR:-./output}:/output:rw
+      # Cache cargo registry
+      - cargo-cache:/root/.cargo/registry
+      - cargo-cache:/home/builder/.cargo/registry
+    working_dir: /workspace
+    command: /bin/bash
+    stdin_open: true
+    tty: true
+
+  colcon-deb-iron:
+    build:
+      context: .
+      dockerfile: base/Dockerfile
+      args:
+        BASE_IMAGE: ros:iron-ros-base
+    image: colcon-deb:iron
+    container_name: colcon-deb-iron
+    environment:
+      - ROS_DISTRO=iron
+      - LOCAL_USER_ID=${UID:-1000}
+      - INJECT_HELPERS=true
+      - TARGET_ARCHITECTURE=${TARGET_ARCH:-amd64}
+    volumes:
+      - ${WORKSPACE:-../}:/workspace:rw
+      - ../scripts/helpers:/opt/colcon-deb/helpers:ro
+      - ${OUTPUT_DIR:-./output}:/output:rw
+      - cargo-cache:/root/.cargo/registry
+      - cargo-cache:/home/builder/.cargo/registry
+    working_dir: /workspace
+    command: /bin/bash
+    stdin_open: true
+    tty: true
+
+  # Test service for multi-arch builds
+  colcon-deb-test:
+    build:
+      context: .
+      dockerfile: base/Dockerfile
+      args:
+        BASE_IMAGE: ${BASE_IMAGE:-ros:loong-ros-base}
+    image: colcon-deb:test
+    container_name: colcon-deb-test
+    environment:
+      - ROS_DISTRO=${ROS_DISTRO:-loong}
+      - LOCAL_USER_ID=${UID:-1000}
+      - INJECT_HELPERS=true
+      - TARGET_ARCHITECTURE=${TARGET_ARCH:-amd64}
+      - DEBIAN_FRONTEND=noninteractive
+    volumes:
+      - ${WORKSPACE:-../}:/workspace:rw
+      - ../scripts/helpers:/opt/colcon-deb/helpers:ro
+      - ${OUTPUT_DIR:-./output}:/output:rw
+      - cargo-cache:/root/.cargo/registry
+      - cargo-cache:/home/builder/.cargo/registry
+    working_dir: /workspace
+    stdin_open: true
+    tty: true
+
+volumes:
+  cargo-cache:
+    driver: local

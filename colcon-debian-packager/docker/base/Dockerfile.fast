@@ -1,0 +1,57 @@
+# Fast Dockerfile for colcon-deb build environment
+# Supports ROS loong on Ubuntu 22.04 (Jammy)
+ARG BASE_IMAGE=ros:loong-ros-base
+FROM ${BASE_IMAGE}
+
+# Avoid interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    # Build essentials
+    build-essential \
+    cmake \
+    pkg-config \
+    # Debian packaging tools
+    debhelper \
+    dpkg-dev \
+    devscripts \
+    lintian \
+    fakeroot \
+    dh-make \
+    # Python and ROS tools
+    python3-pip \
+    python3-colcon-common-extensions \
+    # Version control
+    git \
+    # Utilities
+    curl \
+    wget \
+    sudo \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install http://1.94.193.239/yumrepo/agiros/agirosdep/bloom-0.13.0-py3-none-any.whl
+RUN pip install http://1.94.193.239/yumrepo/agiros/agirosdep/agirosdep-0.25.1-py3-none-any.whl
+
+# Install Rust (we'll install rust-script on demand)
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Create workspace directory
+RUN mkdir -p /workspace
+
+# Copy helper scripts
+COPY scripts/setup-environment.sh /usr/local/bin/
+COPY scripts/inject-helpers.sh /usr/local/bin/
+COPY scripts/entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/*.sh
+
+WORKDIR /workspace
+
+# Labels
+LABEL maintainer="colcon-deb"
+LABEL description="Fast build environment for colcon-deb with ROS loong"
+LABEL version="1.0-fast"
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["/bin/bash"]

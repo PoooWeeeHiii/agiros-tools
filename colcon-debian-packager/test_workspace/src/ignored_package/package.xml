@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>ignored_package</name>
+  <version>1.0.0</version>
+  <description>This package should be ignored</description>
+  <maintainer email="test@example.com">Ignored</maintainer>
+  <license>MIT</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+</package>

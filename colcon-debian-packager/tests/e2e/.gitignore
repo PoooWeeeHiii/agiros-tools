@@ -1,0 +1,49 @@
+# Test output directories
+output/
+logs/
+benchmark_results/
+apt_repo_test/
+ros_test_workspace/
+
+# Generated test files
+*.log
+*.csv
+test-config.yaml
+bench-config.yaml
+
+# Temporary files
+*.tmp
+*.bak
+*~
+
+# APT repository test artifacts
+*.deb
+Packages
+Packages.gz
+Release
+Release.gpg
+InRelease
+
+# Benchmark artifacts
+timings.csv
+memory_*.txt
+test.rs
+
+# Test reports (keep the template but not generated reports)
+test_report.md
+apt_test_report.md
+!test-summary.md
+
+# Cache directories
+.cache/
+__pycache__/
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db

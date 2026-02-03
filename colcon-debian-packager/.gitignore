@@ -1,0 +1,56 @@
+# editor
+*~
+.*~
+*.swp
+*.swo
+\#*#
+
+# Rust
+/target/
+**/*.rs.bk
+
+# rust-script cache
+.rust-script-cache/
+*.rs.cache/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.deb
+*.ddeb
+*.changes
+*.buildinfo
+debian_output/
+debian_packages/
+build/
+output/
+
+# Test artifacts
+/tests/test_workspace/build/
+/tests/test_workspace/install/
+/tests/test_workspace/log/
+/tests/e2e/output/
+/tests/e2e/logs/
+/tests/e2e/benchmark_results/
+/tests/e2e/apt_repo_test/
+/tests/e2e/ros_test_workspace/
+
+# Python (for comparison with original)
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Coverage
+tarpaulin-report.html
+cobertura.xml
+lcov.info
+coverage/
+
+# Verification workspace
+verify_ws/

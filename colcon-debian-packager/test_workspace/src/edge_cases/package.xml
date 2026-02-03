@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>edge_cases</name>
+  <version>0.0.1-alpha</version>
+  <description>Package for testing edge cases</description>
+  
+  <maintainer email="test@example.com">Edge Tester</maintainer>
+  
+  <license>Apache-2.0</license>
+  
+  <!-- Generic depend (should expand to build, build_export, exec) -->
+  <depend>visualization_msgs</depend>
+  
+  <!-- No explicit build type in export -->
+  <buildtool_depend>cmake</buildtool_depend>
+  
+  <!-- Buildtool export dependency -->
+  <buildtool_export_depend>pkg-config</buildtool_export_depend>
+  
+  <!-- System dependencies with hyphens -->
+  <build_depend>libeigen3-dev</build_depend>
+  <exec_depend>python3-matplotlib</exec_depend>
+  
+  <!-- Version constraints of various types -->
+  <build_depend version_gt="1.0">nav_msgs</build_depend>
+  <build_depend version_lt="3.0" version_gte="2.0">tf2</build_depend>
+  
+  <export>
+    <!-- No build_type specified - should infer from buildtool_depend -->
+  </export>
+</package>

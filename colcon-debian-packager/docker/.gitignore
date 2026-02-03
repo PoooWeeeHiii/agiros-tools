@@ -1,0 +1,26 @@
+# Docker build artifacts
+.buildx-cache/
+buildx-cache/
+
+# Test output
+output/
+test-output/
+
+# Local environment files
+.env
+.env.local
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.bak
+*~

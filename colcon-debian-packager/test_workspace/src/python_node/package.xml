@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>python_node</name>
+  <version>1.0.0</version>
+  <description>A Python ROS 2 node example</description>
+  
+  <maintainer email="python@example.com">Python Maintainer</maintainer>
+  <author>Python Dev Team</author>
+  
+  <license>GPL-3.0</license>
+  
+  <buildtool_depend>ament_python</buildtool_depend>
+  
+  <!-- Using generic depend -->
+  <depend>rclpy</depend>
+  <depend>std_msgs</depend>
+  <depend version_lte="2.0.0">sensor_msgs</depend>
+  
+  <!-- Build export dependencies -->
+  <build_export_depend>python3-yaml</build_export_depend>
+  
+  <!-- Test dependencies -->
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+  
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

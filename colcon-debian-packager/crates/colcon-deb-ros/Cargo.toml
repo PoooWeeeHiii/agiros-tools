@@ -1,0 +1,27 @@
+[package]
+name = "colcon-deb-ros"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+description = "AGIROS package handling for Colcon Debian Packager"
+
+[dependencies]
+colcon-deb-core = { path = "../colcon-deb-core" }
+quick-xml = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+walkdir = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+serde_json = { workspace = true }
+rayon = "1.10"
+criterion = "0.5"
+
+[[bench]]
+name = "scanner_bench"
+harness = false
